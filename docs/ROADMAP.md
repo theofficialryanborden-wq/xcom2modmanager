@@ -11,21 +11,24 @@
 - Display common console commands.
 - Choose a Google Drive folder using Android's document picker.
 - Export an enabled-mod manifest locally and to the selected Drive folder.
-- Export enabled mod ZIP files to the selected Drive folder for sync testing.
+- Export enabled mod ZIP files to the selected Drive folder for backup/sync testing.
+- Extract enabled mod ZIP files into PC-style XCOM folders:
+  - `XCom2-WarOfTheChosen/XComGame/Mods/<ModName>`
+  - `XComGame/Mods/<ModName>`
 - Attempt to launch XCOM 2 Collection after export.
 
 ## Current test result
 
 Importing a ZIP into the manager does not make it work in XCOM. The imported file is stored in this app's private storage, not in XCOM 2 Collection's private game data.
 
-The app now labels this as an import/export workflow instead of a completed in-game install workflow. The next real test is whether XCOM's Google Drive save-sync system will import or ignore the enabled ZIP files when they are exported to the same Drive area.
+The user confirmed many PC mods can work on Android. The app now labels this as an import/export workflow and can extract enabled ZIP files into normal PC-style XCOM mod layouts. The next real test is selecting the exact Drive/device folder that maps to the working Android install path.
 
 ## Research needed on a real Android device
 
 These items require a purchased/installed copy of XCOM 2 Collection and real-device testing:
 
 1. Confirm the Android package name for XCOM 2 Collection.
-2. Determine whether the mobile port reads any user-modifiable mod folders.
+2. Determine the exact Android folder/Drive folder where working PC mods are being loaded.
 3. Determine exactly what triggers the built-in Google Drive sync prompt.
 4. Inspect the synced Google Drive folder layout before and after a game save sync.
 5. Test whether the game imports non-save files from Google Drive or ignores them.

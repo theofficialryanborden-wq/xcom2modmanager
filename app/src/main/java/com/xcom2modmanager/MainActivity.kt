@@ -25,6 +25,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.zip.ZipInputStream
 
 class MainActivity : Activity() {
     private lateinit var store: ModStore
@@ -102,7 +103,7 @@ class MainActivity : Activity() {
             openUri(Uri.parse(NEXUS_MODS_URL))
         })
 
-        addView(helpText("Important: importing a ZIP only copies it into this manager. XCOM 2 Android will not use it until we verify a real game-supported folder, Drive layout, or root install path."))
+        addView(helpText("Important: importing a ZIP only copies it into this manager. To make a PC mod usable, export enabled mods as extracted folders into the game-visible layout you use on Android."))
         addView(helpText("Nexus Mods downloads usually require you to sign in and download through their site. Download a mod ZIP first, then return here and tap Import."))
     }
 
@@ -124,7 +125,7 @@ class MainActivity : Activity() {
 
     private fun drivePanel(): View = card("GOOGLE DRIVE SYNC WORKAROUND").apply {
         val savedFolder = store.loadDriveTreeUri()
-        addView(helpText("Android apps cannot force XCOM 2 Collection to show its Google Drive sync prompt. This app can copy enabled ZIPs and a manifest to a Drive folder, then open XCOM so you can test whether the game sync prompt sees them."))
+        addView(helpText("Android apps cannot force XCOM 2 Collection to show its Google Drive sync prompt. This app can export enabled mods to a Drive or device folder in PC-style XCOM layouts, then open XCOM so you can test the sync/install path you already know works."))
 
         addView(secondaryButton(if (savedFolder == null) "Choose Google Drive folder" else "Change Google Drive folder") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -140,7 +141,13 @@ class MainActivity : Activity() {
 
         if (savedFolder != null) {
             addView(helpText("Drive folder selected: $savedFolder"))
-            addView(primaryButton("Write enabled ZIPs + manifest to Drive") {
+            addView(primaryButton("Extract enabled mods to WOTC layout") {
+                writeExtractedEnabledModsToDrive(savedFolder, WOTC_EXPORT_LAYOUT)
+            })
+            addView(secondaryButton("Extract enabled mods to base-game layout") {
+                writeExtractedEnabledModsToDrive(savedFolder, BASE_GAME_EXPORT_LAYOUT)
+            })
+            addView(secondaryButton("Backup enabled ZIPs + manifest") {
                 writeEnabledBundleToDrive(savedFolder)
             })
         }
@@ -149,15 +156,15 @@ class MainActivity : Activity() {
             openPackageOrStore("com.google.android.apps.docs", "Google Drive")
         })
         addView(primaryButton("Prepare sync, then open XCOM 2") {
-            savedFolder?.let { writeEnabledBundleToDrive(it, showSuccess = false) }
+            savedFolder?.let { writeExtractedEnabledModsToDrive(it, WOTC_EXPORT_LAYOUT, showSuccess = false) }
             openXcomOrExplain()
         })
     }
 
     private fun troubleshootingPanel(): View = card("WHY DIDN'T MY MOD WORK?").apply {
-        addView(helpText("The first APK imported your mod into this app, but it did not install that mod into XCOM's private game files. That is why you did not see the mod in-game."))
-        addView(helpText("Current public information suggests XCOM 2 Collection for Android does not officially support the same PC mod system. The next test is exporting enabled ZIPs to the same Google Drive area used by XCOM saves, then checking whether XCOM imports or ignores those files."))
-        addView(helpText("If you have root, a later build can add a careful advanced installer after we know the exact Android package path and mod folder layout. Without those details, copying files blindly could break the game."))
+        addView(helpText("The first APK imported your mod into this app, but it did not extract or place it into an XCOM mod folder. That is why you did not see the mod in-game."))
+        addView(helpText("Because you confirmed many PC mods do work on Android, this build now extracts enabled ZIPs into PC-style XCOM folders. Try the WOTC layout first for XCOM 2 Collection."))
+        addView(helpText("If your proven Android path is different, use the exported folder as a staging folder for now. A later build can add a custom path/root installer once the exact working path is confirmed."))
     }
 
     private fun cheatsPanel(): View = card("CONSOLE COMMAND CHEAT SHEET").apply {
@@ -347,6 +354,168 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun writeExtractedEnabledModsToDrive(
+        treeUriString: String,
+        exportLayout: ExportLayout,
+        showSuccess: Boolean = true
+    ) {
+        try {
+            val treeUri = Uri.parse(treeUriString)
+            val rootDocumentUri = driveRootDocumentUri(treeUri)
+            val enabledMods = store.loadMods().filter { it.enabled }
+            val modsDirectory = ensureDirectoryPath(rootDocumentUri, exportLayout.pathSegments)
+
+            writeJsonDocument(rootDocumentUri, "xcom2_mod_manager_enabled_mods.json", buildEnabledManifestJson())
+
+            var extractedMods = 0
+            enabledMods.forEach { mod ->
+                val modFile = File(mod.filePath)
+                if (modFile.exists()) {
+                    val modDirectory = ensureDirectory(modsDirectory, sanitizePathSegment(mod.name))
+                    extractZipIntoDocumentDirectory(modFile, modDirectory)
+                    extractedMods += 1
+                }
+            }
+
+            if (showSuccess) {
+                showMessage(
+                    "PC-style export complete",
+                    "Extracted $extractedMods enabled mod(s) into:\n${exportLayout.displayPath}\n\nUse this folder with the Android install/sync method you confirmed works."
+                )
+            }
+        } catch (error: Exception) {
+            showMessage("PC-style export failed", error.message ?: "Unknown error")
+        }
+    }
+
+    private fun extractZipIntoDocumentDirectory(zipFile: File, targetDirectory: Uri) {
+        val topLevelFolder = detectSingleTopLevelFolder(zipFile)
+        ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val pathSegments = normalizedZipSegments(entry.name, topLevelFolder)
+                if (pathSegments.isNotEmpty()) {
+                    if (entry.isDirectory) {
+                        ensureDirectoryPath(targetDirectory, pathSegments)
+                    } else {
+                        val parentDirectory = ensureDirectoryPath(targetDirectory, pathSegments.dropLast(1))
+                        writeBinaryDocument(parentDirectory, pathSegments.last(), guessMimeType(pathSegments.last())) { output ->
+                            zip.copyTo(output)
+                        }
+                    }
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+    }
+
+    private fun detectSingleTopLevelFolder(zipFile: File): String? {
+        val topLevelNames = linkedSetOf<String>()
+        var hasRootFile = false
+        ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val segments = normalizedZipSegments(entry.name, null)
+                if (segments.isNotEmpty()) {
+                    if (segments.size == 1 && !entry.isDirectory) {
+                        hasRootFile = true
+                    }
+                    topLevelNames.add(segments.first())
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+        return if (!hasRootFile && topLevelNames.size == 1) topLevelNames.first() else null
+    }
+
+    private fun normalizedZipSegments(entryName: String, topLevelFolder: String?): List<String> {
+        val segments = entryName
+            .replace('\\', '/')
+            .trim('/')
+            .split('/')
+            .filter { it.isNotBlank() && it != "." && it != "__MACOSX" }
+
+        if (segments.any { it == ".." }) return emptyList()
+        val stripped = if (topLevelFolder != null && segments.firstOrNull() == topLevelFolder) {
+            segments.drop(1)
+        } else {
+            segments
+        }
+        return stripped.map { sanitizePathSegment(it) }.filter { it.isNotBlank() }
+    }
+
+    private fun ensureDirectoryPath(startDirectory: Uri, pathSegments: List<String>): Uri {
+        var currentDirectory = startDirectory
+        pathSegments.forEach { segment ->
+            currentDirectory = ensureDirectory(currentDirectory, segment)
+        }
+        return currentDirectory
+    }
+
+    private fun ensureDirectory(parentDirectory: Uri, displayName: String): Uri {
+        val safeName = sanitizePathSegment(displayName)
+        findChildDocument(parentDirectory, safeName, DocumentsContract.Document.MIME_TYPE_DIR)?.let { return it }
+        return DocumentsContract.createDocument(
+            contentResolver,
+            parentDirectory,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            safeName
+        ) ?: throw IllegalStateException("Could not create folder $safeName.")
+    }
+
+    private fun writeJsonDocument(parentDirectory: Uri, displayName: String, json: JSONObject) {
+        writeBinaryDocument(parentDirectory, displayName, "application/json") { output ->
+            output.write(json.toString(2).toByteArray())
+        }
+    }
+
+    private fun writeBinaryDocument(
+        parentDirectory: Uri,
+        displayName: String,
+        mimeType: String,
+        writer: (java.io.OutputStream) -> Unit
+    ) {
+        val safeName = sanitizePathSegment(displayName)
+        val documentUri = findChildDocument(parentDirectory, safeName, null)
+            ?: DocumentsContract.createDocument(contentResolver, parentDirectory, mimeType, safeName)
+            ?: throw IllegalStateException("Could not create file $safeName.")
+
+        contentResolver.openOutputStream(documentUri, "wt").use { output ->
+            requireNotNull(output) { "Could not write $safeName." }
+            writer(output)
+        }
+    }
+
+    private fun findChildDocument(parentDirectory: Uri, displayName: String, mimeType: String?): Uri? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentDirectory,
+            DocumentsContract.getDocumentId(parentDirectory)
+        )
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        contentResolver.query(childrenUri, columns, null, null, null).use { cursor ->
+            if (cursor == null) return null
+            val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            while (cursor.moveToNext()) {
+                val childName = cursor.getString(nameIndex)
+                val childMime = cursor.getString(mimeIndex)
+                if (childName == displayName && (mimeType == null || childMime == mimeType)) {
+                    val childId = cursor.getString(idIndex)
+                    return DocumentsContract.buildDocumentUriUsingTree(parentDirectory, childId)
+                }
+            }
+        }
+        return null
+    }
+
     private fun driveRootDocumentUri(treeUri: Uri): Uri =
         DocumentsContract.buildDocumentUriUsingTree(
             treeUri,
@@ -481,6 +650,24 @@ class MainActivity : Activity() {
     private fun sanitizeFileName(name: String): String =
         name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "mod.zip" }
 
+    private fun sanitizePathSegment(name: String): String =
+        name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().ifBlank { "mod" }
+
+    private fun guessMimeType(fileName: String): String {
+        val lowerName = fileName.lowercase(Locale.US)
+        return when {
+            lowerName.endsWith(".ini") -> "text/plain"
+            lowerName.endsWith(".int") -> "text/plain"
+            lowerName.endsWith(".xcommod") -> "text/plain"
+            lowerName.endsWith(".json") -> "application/json"
+            lowerName.endsWith(".txt") -> "text/plain"
+            lowerName.endsWith(".png") -> "image/png"
+            lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") -> "image/jpeg"
+            lowerName.endsWith(".zip") -> "application/zip"
+            else -> "application/octet-stream"
+        }
+    }
+
     private fun formatDate(timestamp: Long): String =
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.getDefault()).format(Date(timestamp))
 
@@ -490,6 +677,15 @@ class MainActivity : Activity() {
         private const val REQUEST_IMPORT_MOD = 1001
         private const val REQUEST_PICK_DRIVE_FOLDER = 1002
         private const val NEXUS_MODS_URL = "https://www.nexusmods.com/games/xcom2/mods"
+
+        private val WOTC_EXPORT_LAYOUT = ExportLayout(
+            label = "War of the Chosen",
+            pathSegments = listOf("XCom2-WarOfTheChosen", "XComGame", "Mods")
+        )
+        private val BASE_GAME_EXPORT_LAYOUT = ExportLayout(
+            label = "Base game",
+            pathSegments = listOf("XComGame", "Mods")
+        )
 
         private val XCOM_DARK = Color.rgb(7, 17, 31)
         private val XCOM_PANEL = Color.rgb(16, 36, 58)
@@ -503,6 +699,13 @@ class MainActivity : Activity() {
             "com.feralinteractive.xcom2collection"
         )
     }
+}
+
+data class ExportLayout(
+    val label: String,
+    val pathSegments: List<String>
+) {
+    val displayPath: String = pathSegments.joinToString("/")
 }
 
 data class ModRecord(

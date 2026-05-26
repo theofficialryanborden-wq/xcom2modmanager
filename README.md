@@ -2,7 +2,7 @@
 
 An Android starter app for managing downloaded mod files for **XCOM 2 Collection** on Android.
 
-This project is written for a beginner-friendly workflow: the app helps you import mod ZIP files, mark which ones should be exported, export enabled mod ZIPs plus a manifest, open Nexus Mods, view common console commands, and prepare files for a Google Drive sync workaround.
+This project is written for a beginner-friendly workflow: the app helps you import mod ZIP files, mark which ones should be exported, extract enabled PC mods into XCOM-style mod folders, export backup ZIPs plus a manifest, open Nexus Mods, view common console commands, and prepare files for a Google Drive sync workaround.
 
 ## Why your imported mod did not work in-game yet
 
@@ -10,12 +10,13 @@ The first test APK copied your `mod.zip` into this manager app's private storage
 
 That is why installing/importing a ZIP in the first APK did not change the game.
 
-The Android version of XCOM 2 Collection does not appear to officially support the same PC mod system. Public documentation confirms Google Drive is used for save backups, but it does not document a supported Android mod folder. Until we verify an actual folder or sync format that XCOM reads, the app can only safely:
+Even though many PC mods can work on Android, this app still needs to put the extracted mod files in the same folder layout that your working Android setup uses. Until the exact device/Drive/root path is confirmed, the app can safely:
 
 1. store downloaded mod ZIPs,
 2. track which ones you want enabled,
-3. export those enabled ZIPs to a Drive folder,
-4. and open XCOM so you can test whether the game sees them.
+3. extract enabled mods into PC-style XCOM folder layouts,
+4. export backup ZIPs to a Drive folder,
+5. and open XCOM so you can test whether the game sees them.
 
 ## What this first version does
 
@@ -24,7 +25,8 @@ The Android version of XCOM 2 Collection does not appear to officially support t
 - **Enable / disable exports:** track which imported mods should be included when exporting to Drive.
 - **Download online mods:** open the XCOM 2 Nexus Mods page in your browser.
 - **Cheat sheet:** show common XCOM 2 console commands.
-- **Google Drive helper:** choose a Drive folder and export enabled mod ZIPs plus the enabled-mod manifest there.
+- **Google Drive helper:** choose a Drive folder and export enabled mods as extracted PC-style folders.
+- **Backup export:** write enabled mod ZIPs plus the enabled-mod manifest.
 - **XCOM themed design:** dark tactical panels with cyan/orange highlight colors.
 - **Open XCOM 2:** attempt to launch the Android game after preparing sync files.
 
@@ -41,7 +43,7 @@ This app also **does not inject code into XCOM 2**. A true in-game floating mod 
 
 Those approaches need real-device research and can break game terms of service or Android security expectations. This repo starts with the safe pieces first.
 
-The Google Drive sync prompt also cannot currently be forced by a normal Android app. This app can write enabled mod ZIPs and a manifest to a Drive folder and launch the game, but the game decides when to show its own sync prompt and whether it ignores non-save files.
+The Google Drive sync prompt also cannot currently be forced by a normal Android app. This app can write extracted mods, backup ZIPs, and a manifest to a Drive folder and launch the game, but the game decides when to show its own sync prompt and whether it imports those files.
 
 ## Project structure
 
@@ -82,6 +84,7 @@ Think of this first app as a control panel and filing cabinet:
 - It keeps copies of mod downloads.
 - It remembers which ones you marked enabled for export.
 - It writes that list into a file called `xcom2_mod_manager_enabled_mods.json`.
-- It helps you get that file and the enabled ZIPs into Google Drive.
+- It helps you extract those enabled ZIPs into `XCom2-WarOfTheChosen/XComGame/Mods/<ModName>` or `XComGame/Mods/<ModName>`.
+- It can also back up the original ZIPs into Google Drive.
 
 The next hard part is proving exactly which files XCOM 2 Collection on Android reads during Google Drive sync. Once that is known, the app can export files in the format and folder layout the game expects.
