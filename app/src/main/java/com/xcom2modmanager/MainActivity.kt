@@ -60,6 +60,7 @@ class MainActivity : Activity() {
         content.addView(modActionsPanel())
         content.addView(installedModsPanel())
         content.addView(drivePanel())
+        content.addView(troubleshootingPanel())
         content.addView(cheatsPanel())
         content.addView(inGameMenuPanel())
 
@@ -79,7 +80,7 @@ class MainActivity : Activity() {
             letterSpacing = 0.06f
         })
         addView(TextView(context).apply {
-            text = "Safe starter app for installing, tracking, enabling, exporting, and learning mods for XCOM 2 Collection on Android."
+            text = "Safe starter app for importing, tracking, enabling, exporting, and testing mod files for XCOM 2 Collection on Android."
             setTextColor(XCOM_MUTED)
             textSize = 14f
             setPadding(0, dp(8), 0, 0)
@@ -87,7 +88,7 @@ class MainActivity : Activity() {
     }
 
     private fun modActionsPanel(): View = card("MOD OPERATIONS").apply {
-        addView(primaryButton("Install mod ZIP from phone") {
+        addView(primaryButton("Import mod ZIP into manager") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
@@ -101,18 +102,20 @@ class MainActivity : Activity() {
             openUri(Uri.parse(NEXUS_MODS_URL))
         })
 
-        addView(helpText("Nexus Mods downloads usually require you to sign in and download through their site. Download a mod ZIP first, then return here and tap Install."))
+        addView(helpText("Important: importing a ZIP only copies it into this manager. XCOM 2 Android will not use it until we verify a real game-supported folder, Drive layout, or root install path."))
+        addView(helpText("Nexus Mods downloads usually require you to sign in and download through their site. Download a mod ZIP first, then return here and tap Import."))
     }
 
-    private fun installedModsPanel(): View = card("INSTALLED MODS").apply {
+    private fun installedModsPanel(): View = card("IMPORTED MODS").apply {
         val mods = store.loadMods()
         if (mods.isEmpty()) {
-            addView(helpText("No mods installed yet. Tap Install mod ZIP from phone to import one."))
+            addView(helpText("No mods imported yet. Tap Import mod ZIP into manager to copy one into this app."))
         } else {
+            addView(helpText("These mods are stored in this manager only. Enabled means they will be included in exports; it does not mean XCOM has loaded them."))
             mods.forEach { mod ->
                 addView(modRow(mod))
             }
-            addView(secondaryButton("Export enabled-mod manifest") {
+            addView(secondaryButton("Export enabled-mod list locally") {
                 val file = writeEnabledManifest()
                 showMessage("Manifest exported", "Saved enabled mod list to:\n${file.absolutePath}")
             })
@@ -121,7 +124,7 @@ class MainActivity : Activity() {
 
     private fun drivePanel(): View = card("GOOGLE DRIVE SYNC WORKAROUND").apply {
         val savedFolder = store.loadDriveTreeUri()
-        addView(helpText("Android apps cannot force XCOM 2 Collection to show its Google Drive sync prompt. This app can prepare files in a Drive folder and then open XCOM so you can use the game sync prompt if it appears."))
+        addView(helpText("Android apps cannot force XCOM 2 Collection to show its Google Drive sync prompt. This app can copy enabled ZIPs and a manifest to a Drive folder, then open XCOM so you can test whether the game sync prompt sees them."))
 
         addView(secondaryButton(if (savedFolder == null) "Choose Google Drive folder" else "Change Google Drive folder") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -137,8 +140,8 @@ class MainActivity : Activity() {
 
         if (savedFolder != null) {
             addView(helpText("Drive folder selected: $savedFolder"))
-            addView(primaryButton("Write manifest to Drive folder") {
-                writeEnabledManifestToDrive(savedFolder)
+            addView(primaryButton("Write enabled ZIPs + manifest to Drive") {
+                writeEnabledBundleToDrive(savedFolder)
             })
         }
 
@@ -146,9 +149,15 @@ class MainActivity : Activity() {
             openPackageOrStore("com.google.android.apps.docs", "Google Drive")
         })
         addView(primaryButton("Prepare sync, then open XCOM 2") {
-            savedFolder?.let { writeEnabledManifestToDrive(it, showSuccess = false) }
+            savedFolder?.let { writeEnabledBundleToDrive(it, showSuccess = false) }
             openXcomOrExplain()
         })
+    }
+
+    private fun troubleshootingPanel(): View = card("WHY DIDN'T MY MOD WORK?").apply {
+        addView(helpText("The first APK imported your mod into this app, but it did not install that mod into XCOM's private game files. That is why you did not see the mod in-game."))
+        addView(helpText("Current public information suggests XCOM 2 Collection for Android does not officially support the same PC mod system. The next test is exporting enabled ZIPs to the same Google Drive area used by XCOM saves, then checking whether XCOM imports or ignores those files."))
+        addView(helpText("If you have root, a later build can add a careful advanced installer after we know the exact Android package path and mod folder layout. Without those details, copying files blindly could break the game."))
     }
 
     private fun cheatsPanel(): View = card("CONSOLE COMMAND CHEAT SHEET").apply {
@@ -173,7 +182,7 @@ class MainActivity : Activity() {
         setPadding(0, dp(10), 0, dp(10))
 
         addView(TextView(context).apply {
-            text = "${if (mod.enabled) "[ENABLED]" else "[DISABLED]"} ${mod.name}\nInstalled ${formatDate(mod.installedAt)}"
+            text = "${if (mod.enabled) "[EXPORT ENABLED]" else "[EXPORT DISABLED]"} ${mod.name}\nImported ${formatDate(mod.installedAt)}\nStored in manager only; not applied to XCOM yet."
             setTextColor(if (mod.enabled) XCOM_CYAN else XCOM_MUTED)
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
@@ -224,7 +233,7 @@ class MainActivity : Activity() {
                 )
             )
             writeEnabledManifest()
-            showMessage("Mod installed", "$displayName was copied into this app's mod storage. It is disabled until you enable it.")
+            showMessage("Mod imported", "$displayName was copied into this app's storage. It is not installed into XCOM yet. Enable it if you want it included in Drive exports.")
             render()
         } catch (error: Exception) {
             showMessage("Import failed", error.message ?: "Unknown error")
@@ -239,7 +248,7 @@ class MainActivity : Activity() {
             // The URI is still useful during this session even if persistence was denied.
         }
         store.saveDriveTreeUri(uri.toString())
-        showMessage("Drive folder saved", "Enabled mod manifests can now be exported to this folder.")
+        showMessage("Drive folder saved", "Enabled mod ZIPs and the manifest can now be exported to this folder for testing.")
         render()
     }
 
@@ -268,10 +277,7 @@ class MainActivity : Activity() {
     private fun writeEnabledManifestToDrive(treeUriString: String, showSuccess: Boolean = true) {
         try {
             val treeUri = Uri.parse(treeUriString)
-            val rootDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri)
-            )
+            val rootDocumentUri = driveRootDocumentUri(treeUri)
             val documentUri = DocumentsContract.createDocument(
                 contentResolver,
                 rootDocumentUri,
@@ -290,6 +296,62 @@ class MainActivity : Activity() {
             showMessage("Drive export failed", error.message ?: "Unknown error")
         }
     }
+
+    private fun writeEnabledBundleToDrive(treeUriString: String, showSuccess: Boolean = true) {
+        try {
+            val treeUri = Uri.parse(treeUriString)
+            val rootDocumentUri = driveRootDocumentUri(treeUri)
+            val enabledMods = store.loadMods().filter { it.enabled }
+
+            val manifestUri = DocumentsContract.createDocument(
+                contentResolver,
+                rootDocumentUri,
+                "application/json",
+                "xcom2_mod_manager_enabled_mods.json"
+            ) ?: throw IllegalStateException("Could not create the manifest in the selected Drive folder.")
+
+            contentResolver.openOutputStream(manifestUri, "wt").use { output ->
+                requireNotNull(output) { "Could not write the manifest to the selected Drive folder." }
+                output.write(buildEnabledManifestJson().toString(2).toByteArray())
+            }
+
+            var copiedMods = 0
+            enabledMods.forEach { mod ->
+                val modFile = File(mod.filePath)
+                if (modFile.exists()) {
+                    val modDocumentUri = DocumentsContract.createDocument(
+                        contentResolver,
+                        rootDocumentUri,
+                        "application/zip",
+                        sanitizeFileName(mod.name).removeSuffix(".zip") + ".zip"
+                    ) ?: throw IllegalStateException("Could not create ${mod.name} in the selected Drive folder.")
+
+                    modFile.inputStream().use { input ->
+                        contentResolver.openOutputStream(modDocumentUri, "wt").use { output ->
+                            requireNotNull(output) { "Could not write ${mod.name} to the selected Drive folder." }
+                            input.copyTo(output)
+                        }
+                    }
+                    copiedMods += 1
+                }
+            }
+
+            if (showSuccess) {
+                showMessage(
+                    "Drive export complete",
+                    "Wrote the enabled-mod manifest and $copiedMods enabled mod ZIP(s) to the selected Drive folder.\n\nThis still does not guarantee XCOM will load them; it gives us files to test with the game's sync behavior."
+                )
+            }
+        } catch (error: Exception) {
+            showMessage("Drive export failed", error.message ?: "Unknown error")
+        }
+    }
+
+    private fun driveRootDocumentUri(treeUri: Uri): Uri =
+        DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
 
     private fun buildEnabledManifestJson(): JSONObject {
         val enabledMods = JSONArray()

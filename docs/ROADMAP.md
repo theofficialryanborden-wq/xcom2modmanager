@@ -5,13 +5,20 @@
 - Native Android starter app.
 - Import local mod ZIP files with Android's file picker.
 - Store mod records in app preferences.
-- Enable and disable installed mods.
-- Delete installed mod copies.
+- Enable and disable imported mods for export.
+- Delete imported mod copies.
 - Open Nexus Mods in the browser.
 - Display common console commands.
 - Choose a Google Drive folder using Android's document picker.
 - Export an enabled-mod manifest locally and to the selected Drive folder.
+- Export enabled mod ZIP files to the selected Drive folder for sync testing.
 - Attempt to launch XCOM 2 Collection after export.
+
+## Current test result
+
+Importing a ZIP into the manager does not make it work in XCOM. The imported file is stored in this app's private storage, not in XCOM 2 Collection's private game data.
+
+The app now labels this as an import/export workflow instead of a completed in-game install workflow. The next real test is whether XCOM's Google Drive save-sync system will import or ignore the enabled ZIP files when they are exported to the same Drive area.
 
 ## Research needed on a real Android device
 
