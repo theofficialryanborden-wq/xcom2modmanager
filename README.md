@@ -52,6 +52,16 @@ docs/
 
 This repository currently does not include the Gradle wrapper files, so Android Studio is the easiest way to open it.
 
+## Download the test APK
+
+A debug APK is included for easy phone testing:
+
+```text
+downloads/xcom2-mod-manager-debug.apk
+```
+
+On GitHub, open the `downloads` folder, click `xcom2-mod-manager-debug.apk`, then use the download button. On your phone, Android may ask you to allow installing apps from your browser or file manager because this is a test build.
+
 ## Beginner explanation
 
 Think of this first app as a control panel and filing cabinet:
