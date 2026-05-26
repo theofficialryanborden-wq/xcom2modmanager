@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.XCOM2ModManager" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/xcom_dark</item>
+        <item name="android:navigationBarColor">@color/xcom_dark</item>
+        <item name="android:statusBarColor">@color/xcom_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
