@@ -9,31 +9,33 @@
 - Delete imported mod copies.
 - Open Nexus Mods in the browser.
 - Display common console commands.
-- Choose a Google Drive folder using Android's document picker.
+- Choose an export/staging folder using Android's document picker.
 - Export an enabled-mod manifest locally and to the selected Drive folder.
 - Export enabled mod ZIP files to the selected Drive folder for backup/sync testing.
-- Extract enabled mod ZIP files into PC-style XCOM folders:
-  - `XCom2-WarOfTheChosen/XComGame/Mods/<ModName>`
-  - `XComGame/Mods/<ModName>`
+- Build an Android USB install package rooted at:
+  - `XCOM2_ANDROID_USB_INSTALL_PACKAGE/Android/data/com.feralinteractive.xcom2_android/files/feral_app_support/VFS/Local/my games/XCOM2 War of the Chosen/XComGame`
+- Extract enabled mod ZIP files into:
+  - `.../XComGame/Mods/<ModName>`
+- Generate:
+  - `.../XComGame/Config/XComModOptions.ini`
 - Attempt to launch XCOM 2 Collection after export.
 
 ## Current test result
 
 Importing a ZIP into the manager does not make it work in XCOM. The imported file is stored in this app's private storage, not in XCOM 2 Collection's private game data.
 
-The user confirmed many PC mods can work on Android. The app now labels this as an import/export workflow and can extract enabled ZIP files into normal PC-style XCOM mod layouts. The next real test is selecting the exact Drive/device folder that maps to the working Android install path.
+The user confirmed many PC mods can work on Android and provided the working Feral path. The app now builds a USB-copy package for that path and generates ActiveMods entries. The remaining manual step is editing Feral's preference `.ini` so `DisableAllMods` is `0`.
 
 ## Research needed on a real Android device
 
 These items require a purchased/installed copy of XCOM 2 Collection and real-device testing:
 
-1. Confirm the Android package name for XCOM 2 Collection.
-2. Determine the exact Android folder/Drive folder where working PC mods are being loaded.
-3. Determine exactly what triggers the built-in Google Drive sync prompt.
-4. Inspect the synced Google Drive folder layout before and after a game save sync.
-5. Test whether the game imports non-save files from Google Drive or ignores them.
-6. Verify whether console commands can be enabled in the Android build.
-7. Verify whether any supported mod loader exists for the Android build.
+1. Confirm whether `XComModOptions.ini` casing/location is always accepted on Android.
+2. Confirm whether the mod identifier should always be the `.XComMod` filename, or whether some mods need a different ActiveMods value.
+3. Find the exact Feral preference `.ini` filename/path across Android versions.
+4. Determine whether Storage Access Framework can write the target path on any supported Android versions, or whether USB is always required.
+5. Verify whether console commands can be enabled in the Android build.
+6. Track compatibility: UI mods may fail; Community Highlander is reported to crash.
 
 ## Later safe features
 
@@ -42,7 +44,8 @@ These items require a purchased/installed copy of XCOM 2 Collection and real-dev
 - Per-mod notes and screenshots.
 - Nexus Mods API integration if the user provides an API key and Nexus terms allow the workflow.
 - Export profiles, such as "vanilla", "quality of life", and "cheat run".
-- A guided setup wizard for Google Drive folder testing.
+- A guided setup wizard for USB copying and preference `.ini` editing.
+- Optional rooted direct installer for users who knowingly grant root access.
 
 ## In-game menu/injection note
 

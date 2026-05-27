@@ -123,11 +123,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun drivePanel(): View = card("GOOGLE DRIVE SYNC WORKAROUND").apply {
+    private fun drivePanel(): View = card("ANDROID USB INSTALL PACKAGE").apply {
         val savedFolder = store.loadDriveTreeUri()
-        addView(helpText("Android apps cannot force XCOM 2 Collection to show its Google Drive sync prompt. This app can export enabled mods to a Drive or device folder in PC-style XCOM layouts, then open XCOM so you can test the sync/install path you already know works."))
+        addView(helpText("Known Android path: Internal Storage/Android/data/com.feralinteractive.xcom2_android/files/feral_app_support/VFS/Local/my games/XCOM2 War of the Chosen/XComGame"))
+        addView(helpText("New Android versions block normal phone file managers from Android/data. Use this app to build a USB install package, then copy it from a computer using Android File Transfer/MTP."))
 
-        addView(secondaryButton(if (savedFolder == null) "Choose Google Drive folder" else "Change Google Drive folder") {
+        addView(secondaryButton(if (savedFolder == null) "Choose export/staging folder" else "Change export/staging folder") {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                 addFlags(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -140,12 +141,15 @@ class MainActivity : Activity() {
         })
 
         if (savedFolder != null) {
-            addView(helpText("Drive folder selected: $savedFolder"))
-            addView(primaryButton("Extract enabled mods to WOTC layout") {
-                writeExtractedEnabledModsToDrive(savedFolder, WOTC_EXPORT_LAYOUT)
+            addView(helpText("Export folder selected: $savedFolder"))
+            addView(primaryButton("Build Android USB install package") {
+                writeAndroidUsbInstallPackage(savedFolder)
             })
-            addView(secondaryButton("Extract enabled mods to base-game layout") {
-                writeExtractedEnabledModsToDrive(savedFolder, BASE_GAME_EXPORT_LAYOUT)
+            addView(secondaryButton("Extract only to final XCOMGame layout") {
+                writeExtractedEnabledModsToDrive(savedFolder, ANDROID_XCOMGAME_EXPORT_LAYOUT)
+            })
+            addView(secondaryButton("Extract legacy PC WOTC layout") {
+                writeExtractedEnabledModsToDrive(savedFolder, LEGACY_WOTC_EXPORT_LAYOUT)
             })
             addView(secondaryButton("Backup enabled ZIPs + manifest") {
                 writeEnabledBundleToDrive(savedFolder)
@@ -156,15 +160,15 @@ class MainActivity : Activity() {
             openPackageOrStore("com.google.android.apps.docs", "Google Drive")
         })
         addView(primaryButton("Prepare sync, then open XCOM 2") {
-            savedFolder?.let { writeExtractedEnabledModsToDrive(it, WOTC_EXPORT_LAYOUT, showSuccess = false) }
+            savedFolder?.let { writeAndroidUsbInstallPackage(it, showSuccess = false) }
             openXcomOrExplain()
         })
     }
 
     private fun troubleshootingPanel(): View = card("WHY DIDN'T MY MOD WORK?").apply {
         addView(helpText("The first APK imported your mod into this app, but it did not extract or place it into an XCOM mod folder. That is why you did not see the mod in-game."))
-        addView(helpText("Because you confirmed many PC mods do work on Android, this build now extracts enabled ZIPs into PC-style XCOM folders. Try the WOTC layout first for XCOM 2 Collection."))
-        addView(helpText("If your proven Android path is different, use the exported folder as a staging folder for now. A later build can add a custom path/root installer once the exact working path is confirmed."))
+        addView(helpText("This build uses the Android WOTC path you provided and generates XComModOptions.ini with ActiveMods entries for enabled mods."))
+        addView(helpText("You still need to change DisableAllMods from 1 to 0 in Feral's preference .ini manually, because overwriting that file could damage unrelated game settings."))
     }
 
     private fun cheatsPanel(): View = card("CONSOLE COMMAND CHEAT SHEET").apply {
@@ -371,8 +375,7 @@ class MainActivity : Activity() {
             enabledMods.forEach { mod ->
                 val modFile = File(mod.filePath)
                 if (modFile.exists()) {
-                    val modDirectory = ensureDirectory(modsDirectory, sanitizePathSegment(mod.name))
-                    extractZipIntoDocumentDirectory(modFile, modDirectory)
+                    exportModToModsDirectory(mod, modsDirectory)
                     extractedMods += 1
                 }
             }
@@ -387,6 +390,88 @@ class MainActivity : Activity() {
             showMessage("PC-style export failed", error.message ?: "Unknown error")
         }
     }
+
+    private fun writeAndroidUsbInstallPackage(treeUriString: String, showSuccess: Boolean = true) {
+        try {
+            val treeUri = Uri.parse(treeUriString)
+            val rootDocumentUri = driveRootDocumentUri(treeUri)
+            val enabledMods = store.loadMods().filter { it.enabled }
+            val packageRoot = ensureDirectory(rootDocumentUri, USB_PACKAGE_ROOT_FOLDER)
+            val xcomGameDirectory = ensureDirectoryPath(packageRoot, ANDROID_XCOMGAME_PATH)
+            val modsDirectory = ensureDirectory(xcomGameDirectory, "Mods")
+            val configDirectory = ensureDirectory(xcomGameDirectory, "Config")
+            val feralSupportDirectory = ensureDirectoryPath(packageRoot, ANDROID_FERAL_SUPPORT_PATH)
+
+            val activeModNames = mutableListOf<String>()
+            enabledMods.forEach { mod ->
+                val modFile = File(mod.filePath)
+                if (modFile.exists()) {
+                    activeModNames += exportModToModsDirectory(mod, modsDirectory)
+                }
+            }
+
+            writeTextDocument(configDirectory, "XComModOptions.ini", buildXComModOptions(activeModNames))
+            writeJsonDocument(packageRoot, "xcom2_mod_manager_enabled_mods.json", buildEnabledManifestJson())
+            writeTextDocument(packageRoot, "README_USB_INSTALL.txt", buildUsbInstallInstructions(activeModNames))
+            writeTextDocument(feralSupportDirectory, "EDIT_PREFERENCE_INI_README.txt", PREFERENCE_INI_INSTRUCTIONS)
+
+            if (showSuccess) {
+                showMessage(
+                    "Android USB package complete",
+                    "Exported ${activeModNames.size} enabled mod(s) into:\n$USB_PACKAGE_ROOT_FOLDER\n\nCopy that package's Android folder into your phone's Internal Storage using USB file transfer, then edit preference .ini so DisableAllMods is 0."
+                )
+            }
+        } catch (error: Exception) {
+            showMessage("Android USB package failed", error.message ?: "Unknown error")
+        }
+    }
+
+    private fun exportModToModsDirectory(mod: ModRecord, modsDirectory: Uri): String {
+        val modFile = File(mod.filePath)
+        val modDirectoryName = detectModIdentifier(modFile, mod)
+        val modDirectory = ensureDirectory(modsDirectory, modDirectoryName)
+        extractZipIntoDocumentDirectory(modFile, modDirectory)
+        return modDirectoryName
+    }
+
+    private fun buildXComModOptions(activeModNames: List<String>): String =
+        buildString {
+            appendLine("[Engine.XComModOptions]")
+            activeModNames.distinct().forEach { modName ->
+                appendLine("ActiveMods=\"$modName\"")
+            }
+        }
+
+    private fun buildUsbInstallInstructions(activeModNames: List<String>): String =
+        buildString {
+            appendLine("XCOM 2 Collection Android mod install package")
+            appendLine()
+            appendLine("1. Connect your Android phone to your Windows PC with USB.")
+            appendLine("2. On the phone, choose File Transfer / Android Auto / MTP.")
+            appendLine("3. Open the phone's Internal Storage on Windows.")
+            appendLine("4. Copy the Android folder from this package into the root of Internal Storage.")
+            appendLine("   Let Windows merge folders if it asks.")
+            appendLine()
+            appendLine("Target Mods folder:")
+            appendLine("Internal Storage/Android/data/com.feralinteractive.xcom2_android/files/feral_app_support/VFS/Local/my games/XCOM2 War of the Chosen/XComGame/Mods")
+            appendLine()
+            appendLine("Target config file generated by this app:")
+            appendLine("Internal Storage/Android/data/com.feralinteractive.xcom2_android/files/feral_app_support/VFS/Local/my games/XCOM2 War of the Chosen/XComGame/Config/XComModOptions.ini")
+            appendLine()
+            appendLine("Manual preference .ini edit still required:")
+            appendLine("Change <value name=\"DisableAllMods\" type=\"integer\">1</value>")
+            appendLine("to     <value name=\"DisableAllMods\" type=\"integer\">0</value>")
+            appendLine()
+            appendLine("Enabled ActiveMods generated:")
+            if (activeModNames.isEmpty()) {
+                appendLine("- none")
+            } else {
+                activeModNames.distinct().forEach { appendLine("- $it") }
+            }
+            appendLine()
+            appendLine("Known compatibility note:")
+            appendLine("Gameplay/config mods are more likely to work. UI mods may fail if the mobile UI differs. Community Highlander is reported to crash on startup.")
+        }
 
     private fun extractZipIntoDocumentDirectory(zipFile: File, targetDirectory: Uri) {
         val topLevelFolder = detectSingleTopLevelFolder(zipFile)
@@ -430,6 +515,28 @@ class MainActivity : Activity() {
         return if (!hasRootFile && topLevelNames.size == 1) topLevelNames.first() else null
     }
 
+    private fun detectModIdentifier(zipFile: File, mod: ModRecord): String {
+        detectXComModFileName(zipFile)?.let { return sanitizePathSegment(it) }
+        detectSingleTopLevelFolder(zipFile)?.let { return sanitizePathSegment(it) }
+        return sanitizePathSegment(mod.name.removeSuffix(".zip"))
+    }
+
+    private fun detectXComModFileName(zipFile: File): String? {
+        ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val segments = normalizedZipSegments(entry.name, null)
+                val fileName = segments.lastOrNull()
+                if (!entry.isDirectory && fileName != null && fileName.lowercase(Locale.US).endsWith(".xcommod")) {
+                    return fileName.substringBeforeLast(".")
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+        return null
+    }
+
     private fun normalizedZipSegments(entryName: String, topLevelFolder: String?): List<String> {
         val segments = entryName
             .replace('\\', '/')
@@ -466,8 +573,17 @@ class MainActivity : Activity() {
     }
 
     private fun writeJsonDocument(parentDirectory: Uri, displayName: String, json: JSONObject) {
-        writeBinaryDocument(parentDirectory, displayName, "application/json") { output ->
-            output.write(json.toString(2).toByteArray())
+        writeTextDocument(parentDirectory, displayName, json.toString(2), "application/json")
+    }
+
+    private fun writeTextDocument(
+        parentDirectory: Uri,
+        displayName: String,
+        text: String,
+        mimeType: String = "text/plain"
+    ) {
+        writeBinaryDocument(parentDirectory, displayName, mimeType) { output ->
+            output.write(text.toByteArray())
         }
     }
 
@@ -678,14 +794,43 @@ class MainActivity : Activity() {
         private const val REQUEST_PICK_DRIVE_FOLDER = 1002
         private const val NEXUS_MODS_URL = "https://www.nexusmods.com/games/xcom2/mods"
 
-        private val WOTC_EXPORT_LAYOUT = ExportLayout(
-            label = "War of the Chosen",
+        private const val USB_PACKAGE_ROOT_FOLDER = "XCOM2_ANDROID_USB_INSTALL_PACKAGE"
+
+        private val ANDROID_FERAL_SUPPORT_PATH = listOf(
+            "Android",
+            "data",
+            "com.feralinteractive.xcom2_android",
+            "files",
+            "feral_app_support"
+        )
+
+        private val ANDROID_XCOMGAME_PATH = ANDROID_FERAL_SUPPORT_PATH + listOf(
+            "VFS",
+            "Local",
+            "my games",
+            "XCOM2 War of the Chosen",
+            "XComGame"
+        )
+
+        private val ANDROID_XCOMGAME_EXPORT_LAYOUT = ExportLayout(
+            label = "Android XCOMGame",
+            pathSegments = ANDROID_XCOMGAME_PATH + "Mods"
+        )
+        private val LEGACY_WOTC_EXPORT_LAYOUT = ExportLayout(
+            label = "Legacy PC War of the Chosen",
             pathSegments = listOf("XCom2-WarOfTheChosen", "XComGame", "Mods")
         )
-        private val BASE_GAME_EXPORT_LAYOUT = ExportLayout(
+        private val LEGACY_BASE_GAME_EXPORT_LAYOUT = ExportLayout(
             label = "Base game",
             pathSegments = listOf("XComGame", "Mods")
         )
+
+        private const val PREFERENCE_INI_INSTRUCTIONS =
+            "Open Feral's preference .ini under feral_app_support and find this line:\n" +
+                "<value name=\"DisableAllMods\" type=\"integer\">1</value>\n\n" +
+                "Change it to:\n" +
+                "<value name=\"DisableAllMods\" type=\"integer\">0</value>\n\n" +
+                "This app does not overwrite preference .ini automatically because that file may contain other game settings."
 
         private val XCOM_DARK = Color.rgb(7, 17, 31)
         private val XCOM_PANEL = Color.rgb(16, 36, 58)
